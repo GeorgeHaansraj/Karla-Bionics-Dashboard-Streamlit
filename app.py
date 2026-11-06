@@ -1,5 +1,6 @@
 import streamlit as st
 import firebase_admin
+import ast
 from firebase_admin import credentials
 from firebase_admin import firestore
 import pandas as pd
@@ -82,48 +83,68 @@ tab_publik, tab_internal = st.tabs(
 )
 
 with tab_publik:
-    # Pindahkan SEMUA baris kode dasbor publikmu ke sini
-    # (Hero cards, grafik peta, donut chart, teks narasi CSR)
     st.header("Laporan Dampak Sosial")
-
-    st.title("🌟 Laporan Dampak & Keberlanjutan CSR")
     st.write(
         "Selamat datang di Dasbor Publik Karla Bionics. Di sini kami menyoroti narasi positif, kemandirian pasien, dan dampak sosial yang terukur (SDG 4)."
     )
 
     st.markdown("---")
 
-    # Memastikan kolom Durasi dibaca sebagai angka (mengabaikan NaN/teks kosong)
-    df["Durasi_Pakai_Jam"] = pd.to_numeric(
-        df["Durasi_Pakai_Jam"], errors="coerce"
+    df_public = df.copy()
+    for column in [
+        "ID_Pasien",
+        "Domisili",
+        "Status_Utilitas",
+        "Sentimen_Laporan",
+        "Kutipan_Asli",
+        "Kategori_Tuna_Daksa",
+        "Kategori_Aktivitas_ADL",
+    ]:
+        if column not in df_public:
+            df_public[column] = ""
+        df_public[column] = df_public[column].fillna("").astype(str).str.strip()
+    df_public["Durasi_Pakai_Jam"] = pd.to_numeric(
+        df_public.get("Durasi_Pakai_Jam", pd.Series(dtype=float)), errors="coerce"
     ).fillna(0)
+    df_public["Usia"] = pd.to_numeric(
+        df_public.get("Usia", pd.Series(dtype=float)), errors="coerce"
+    )
+    df_public["Tanggal_Lapor"] = pd.to_datetime(
+        df_public.get("Tanggal_Lapor", pd.Series(dtype="datetime64[ns]")),
+        errors="coerce",
+    )
 
-    # 1. HERO CARDS (Metrik Kinerja Utama)
+    st.subheader("Opsi A - Metrik Utama (KPI)")
     col1, col2, col3 = st.columns(3)
-    total_pasien = len(df)
-    total_jam_produktif = int(df["Durasi_Pakai_Jam"].sum())
-    utilitas_positif = len(
-        df[df["Status_Utilitas"].isin(["Sangat Berguna", "Cukup Berguna"])]
+    total_pasien = df_public.loc[df_public["ID_Pasien"].ne(""), "ID_Pasien"].nunique()
+    total_jam_produktif = int(df_public["Durasi_Pakai_Jam"].sum())
+    utilitas_positif = (
+        df_public["Status_Utilitas"].isin(["Sangat Berguna", "Cukup Berguna"]).sum()
+    )
+    tingkat_kepuasan = (
+        (utilitas_positif / len(df_public) * 100) if len(df_public) else 0
     )
 
     col1.metric(label="Total Penerima Manfaat", value=f"{total_pasien} Jiwa")
     col2.metric(
         label="Total Jam Produktif (Akumulasi)", value=f"{total_jam_produktif} Jam"
     )
-    col3.metric(label="Pengguna Aktif & Terbantu", value=f"{utilitas_positif} Pasien")
+    col3.metric(label="Tingkat Kepuasan Pengguna", value=f"{tingkat_kepuasan:.0f}%")
 
     st.markdown("---")
 
-    # 2. GRAFIK VISUALISASI
+    st.subheader("Opsi B - Visualisasi Persebaran & Demografi")
     chart_col1, chart_col2 = st.columns(2)
 
     with chart_col1:
         st.subheader("Peta Sebaran Wilayah")
-        # Menghitung jumlah pasien per domisili
-        df_domisili = df["Domisili"].value_counts().reset_index()
+        df_domisili = (
+            df_public.loc[df_public["Domisili"].ne(""), "Domisili"]
+            .value_counts()
+            .reset_index()
+        )
         df_domisili.columns = ["Provinsi", "Jumlah Pasien"]
 
-        # Membuat Bar Chart Interaktif
         fig_sebaran = px.bar(
             df_domisili,
             x="Provinsi",
@@ -136,40 +157,141 @@ with tab_publik:
         st.plotly_chart(fig_sebaran, use_container_width=True)
 
     with chart_col2:
-        st.subheader("Tingkat Kebermanfaatan Alat")
-        # Menghitung persentase utilitas
-        df_utilitas = df["Status_Utilitas"].value_counts().reset_index()
-        df_utilitas.columns = ["Status", "Total"]
-
-        # Membuat Donut Chart
-        fig_util = px.pie(
-            df_utilitas,
-            names="Status",
-            values="Total",
-            hole=0.4,
-            color="Status",
-            color_discrete_map={
-                "Sangat Berguna": "#2ecc71",
-                "Cukup Berguna": "#3498db",
-                "Terkendala": "#f1c40f",
-                "Tidak Berguna": "#e74c3c",
-            },
+        st.subheader("Distribusi Usia")
+        fig_usia = px.histogram(
+            df_public.dropna(subset=["Usia"]),
+            x="Usia",
+            nbins=10,
+            labels={"Usia": "Usia (tahun)", "count": "Jumlah Penerima"},
+            color_discrete_sequence=["#2a9d8f"],
         )
-        st.plotly_chart(fig_util, use_container_width=True)
+        fig_usia.update_layout(bargap=0.12)
+        st.plotly_chart(fig_usia, use_container_width=True)
+
+    st.subheader("Sebaran Kategori Tuna Daksa")
+    df_kategori = (
+        df_public.loc[df_public["Kategori_Tuna_Daksa"].ne(""), "Kategori_Tuna_Daksa"]
+        .value_counts()
+        .reset_index()
+    )
+    df_kategori.columns = ["Kategori", "Jumlah"]
+    fig_kategori = px.pie(
+        df_kategori,
+        names="Kategori",
+        values="Jumlah",
+        hole=0.45,
+        color_discrete_sequence=px.colors.qualitative.Set2,
+    )
+    st.plotly_chart(fig_kategori, use_container_width=True)
 
     st.markdown("---")
 
-    # 3. KUTIPAN TESTIMONI (Hanya Sentimen Positif)
-    st.subheader("💬 Cerita Kebaikan (Testimoni)")
-    # Menyaring data khusus yang positif
-    df_positif = (
-        df[df["Sentimen_Laporan"] == "Positif"].dropna(subset=["Kutipan_Asli"]).head(3)
+    st.subheader("Opsi C - Metrik Dampak Sosial (SDGs)")
+    st.markdown("**Tingkat Kebermanfaatan Alat**")
+    st.progress(
+        round(tingkat_kepuasan),
+        text=f"{tingkat_kepuasan:.0f}% laporan menyatakan alat sangat atau cukup berguna",
     )
+    st.caption("Gabungan status Sangat Berguna dan Cukup Berguna")
 
-    for index, row in df_positif.iterrows():
-        st.success(
-            f"**{row['ID_Pasien']} ({row['Usia']} Tahun, {row['Domisili']})**\n\n> *\"{row['Kutipan_Asli']}\"*"
+    aktivitas = []
+    for raw_value in df_public["Kategori_Aktivitas_ADL"]:
+        try:
+            parsed_value = ast.literal_eval(raw_value)
+            aktivitas.extend(
+                parsed_value if isinstance(parsed_value, list) else [parsed_value]
+            )
+        except (ValueError, SyntaxError):
+            if raw_value:
+                aktivitas.append(raw_value)
+    df_aktivitas = pd.Series(aktivitas, dtype="string").str.strip()
+    df_aktivitas = df_aktivitas[df_aktivitas.ne("Pasif/Hanya Dipakai")]
+    df_aktivitas = df_aktivitas.value_counts().head(5).sort_values().reset_index()
+    df_aktivitas.columns = ["Aktivitas", "Jumlah"]
+    fig_aktivitas = px.bar(
+        df_aktivitas,
+        x="Jumlah",
+        y="Aktivitas",
+        orientation="h",
+        text_auto=True,
+        color_discrete_sequence=["#e76f51"],
+    )
+    fig_aktivitas.update_layout(showlegend=False)
+    st.plotly_chart(fig_aktivitas, use_container_width=True)
+
+    st.markdown("---")
+
+    st.subheader("Opsi D - Jejak Historis / Tren Pertumbuhan")
+    df_tren = df_public.dropna(subset=["Tanggal_Lapor"]).copy()
+    if not df_tren.empty:
+        df_tren["Bulan"] = df_tren["Tanggal_Lapor"].dt.to_period("M").astype(str)
+        df_tren = (
+            df_tren.groupby("Bulan")["ID_Pasien"]
+            .nunique()
+            .rename("Penerima Manfaat Unik")
+            .reset_index()
         )
+        fig_tren = px.line(
+            df_tren,
+            x="Bulan",
+            y="Penerima Manfaat Unik",
+            markers=True,
+            labels={"Bulan": "Bulan", "Penerima Manfaat Unik": "Penerima Manfaat"},
+        )
+        st.plotly_chart(fig_tren, use_container_width=True)
+    else:
+        st.info("Belum ada data tanggal laporan untuk ditampilkan.")
+
+    st.markdown("---")
+
+    st.subheader("Opsi E - Cerita Kebaikan (NLP Sentimen)")
+    df_positif = df_public[
+        (
+            (df_public["Sentimen_Laporan"] == "Positif")
+            | (df_public["Status_Utilitas"] == "Sangat Berguna")
+        )
+        & df_public["Kutipan_Asli"].ne("")
+    ].reset_index(drop=True)
+
+    if not df_positif.empty:
+        pilihan_testimoni = st.radio(
+            "Testimoni kurasi",
+            range(len(df_positif)),
+            format_func=lambda index: f"Testimoni {index + 1} dari {len(df_positif)}",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        row = df_positif.iloc[pilihan_testimoni]
+        usia = f"{row['Usia']:.0f}" if pd.notna(row["Usia"]) else "-"
+        st.success(
+            f"*\"{row['Kutipan_Asli']}\"*\n\n"
+            f"**P-{row['ID_Pasien']}** | Usia: {usia}, {row['Domisili']} | {row['Kategori_Tuna_Daksa']}"
+        )
+    else:
+        st.info("Belum ada testimoni positif yang dapat ditampilkan.")
+
+    teks_positif = " ".join(
+        df_public.loc[
+            (df_public["Sentimen_Laporan"] == "Positif")
+            & df_public["Kutipan_Asli"].ne(""),
+            "Kutipan_Asli",
+        ]
+    )
+    if teks_positif:
+        try:
+            import matplotlib.pyplot as plt
+            from wordcloud import WordCloud
+
+            wordcloud = WordCloud(
+                width=1200, height=500, background_color="white", colormap="viridis"
+            ).generate(teks_positif)
+            fig_wordcloud, ax = plt.subplots(figsize=(12, 5))
+            ax.imshow(wordcloud, interpolation="bilinear")
+            ax.axis("off")
+            st.pyplot(fig_wordcloud)
+            plt.close(fig_wordcloud)
+        except ImportError:
+            st.caption("Word cloud tersedia setelah library wordcloud terpasang.")
 
     st.markdown("---")
 
