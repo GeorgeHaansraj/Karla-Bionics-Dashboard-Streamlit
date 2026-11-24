@@ -93,11 +93,7 @@ st.set_page_config(
 #    f"Status Koneksi: Terhubung ke Firestore\nTotal Data: {len(df)} Laporan"
 # )
 
-st.sidebar.title("Karla Bionics Streamlit Dashboard")
-st.sidebar.markdown("---")
-st.sidebar.info(
-    f"Status Koneksi: Terhubung ke Firestore\nTotal Data: {len(df)} Laporan"
-)
+
 # (Bagian st.sidebar.radio sudah dihapus sepenuhnya)
 
 # ==========================================
